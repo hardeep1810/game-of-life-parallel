@@ -2,7 +2,8 @@
 #define GAME_OF_LIFE_H
 
 #include <mpi.h>
-#include "LocalGameOfLife.h"
+// #include "LocalGameOfLife.h"
+#include "../src/LocalGameOfLife.h"
 #include <memory>
 #include <Eigen/Dense>
 

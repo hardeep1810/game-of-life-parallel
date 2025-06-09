@@ -27,26 +27,43 @@ const sf::Color colors[20] = {
 GameOfLifeUI::GameOfLifeUI(int rows, int cols, uint cell_size, bool visualize_grid,
                            std::string window_title)
         : rows_(rows), cols_(cols), cell_size_(cell_size), visualize_grid_(visualize_grid),
-          window_(sf::VideoMode(sf::Vector2u(cols * cell_size, rows * cell_size)),
-                  window_title),
+          window_(sf::VideoMode(cols * cell_size,rows * cell_size),window_title),
           cell_shape_(sf::Vector2f(cell_size - 1.f, cell_size - 1.f)) {
     window_.setFramerateLimit(fps_limit_);
 }
 
 bool GameOfLifeUI::poll_events() {
-    while (const std::optional event = window_.pollEvent()) {
-        if (event->is<sf::Event::Closed>())
+    // while (const std::optional event = window_.pollEvent()) {
+    sf::Event event;   
+    while(window_.pollEvent(event)){
+        // if (event->is<sf::Event::Closed>())
+        if(event.type == sf::Event::Closed)
             return false;
 
-        if (auto keyPressed = event->getIf<sf::Event::KeyPressed>()) {
-            if (keyPressed->scancode == sf::Keyboard::Scancode::Escape)
-                return false;
+        // if (auto keyPressed = event->getIf<sf::Event::KeyPressed>()) {
+        //     if (keyPressed->scancode == sf::Keyboard::Scancode::Escape)
+        //         return false;
 
-            else if (keyPressed->scancode == sf::Keyboard::Scancode::Up) {
-                fps_limit_ = std::min(120, fps_limit_ + 5);
+        //     else if (keyPressed->scancode == sf::Keyboard::Scancode::Up) {
+        //         fps_limit_ = std::min(120, fps_limit_ + 5);
+        //         window_.setFramerateLimit(fps_limit_);
+        //     } else if (keyPressed->scancode == sf::Keyboard::Scancode::Down) {
+        //         fps_limit_ = std::max(1, fps_limit_ - 5);
+        //         window_.setFramerateLimit(fps_limit_);
+        //     }
+        // }
+        if(event.type == sf::Event::KeyPressed)
+        {
+            if(event.key.code == sf::Keyboard::Escape)
+            return false;
+            else if(event.key.code == sf::Keyboard::Up)
+            {
+                fps_limit_ = std::min(120,fps_limit_+5);
                 window_.setFramerateLimit(fps_limit_);
-            } else if (keyPressed->scancode == sf::Keyboard::Scancode::Down) {
-                fps_limit_ = std::max(1, fps_limit_ - 5);
+            }
+            else if(event.key.code == sf::Keyboard::Down)
+            {
+                fps_limit_ = std::max(1,fps_limit_-5);
                 window_.setFramerateLimit(fps_limit_);
             }
         }

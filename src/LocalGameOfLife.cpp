@@ -22,8 +22,10 @@ LocalGameOfLife::LocalGameOfLife(int local_rows, int local_cols, MPI_Comm cart_c
     // Retrieve the topology information from the communicator. This was created in the GameOfLife constructor
     // and serves as main communicator for the parallelization.
     // See https://www.mpich.org/static/docs/v3.1/www3/MPI_Cart_get.html
-    MPI_Cart_get(cart_comm_, 2, dims_, (int[2]) {0, 0}, coords_);
-
+    // MPI_Cart_get(cart_comm_, 2, dims_, (int[2]) {0, 0}, coords_);
+        int periods[2] = {0,0};
+        MPI_Cart_get(cart_comm_, 2 ,dims_, periods , coords_);
+    
     // MPI_Cart_Shift is a nice helper functions to get the neighbours for the topology.
     // We use the periods of cartesian topology
     // to implement the toroidal/periodic boundary conditions of the Game Of Life.
@@ -43,8 +45,10 @@ LocalGameOfLife::LocalGameOfLife(int local_rows, int local_cols, MPI_Comm cart_c
 
     // Setup of current and next grid for Game Of Life. Check any web tutorial or the wikipedia page for why two
     // grids are used.
-    current_grid_ = Eigen::MatrixXi::Zero(local_rows_, local_cols_);
-    next_grid_ = Eigen::MatrixXi::Zero(local_rows_, local_cols_);
+    // current_grid_ = Eigen::MatrixXi::Zero(local_rows_, local_cols_);
+    // next_grid_ = Eigen::MatrixXi::Zero(local_rows_, local_cols_);
+    current_grid_ = Eigen::MatrixXi::Zero(local_rows_ + 2 * halo_size_, local_cols_ + 2 * halo_size_);
+    next_grid_ = Eigen::MatrixXi::Zero(local_rows_ + 2 * halo_size_, local_cols_ + 2 * halo_size_);
 }
 
 void LocalGameOfLife::randomize(double alive_prob) {
@@ -70,17 +74,38 @@ int LocalGameOfLife::count_alive_neighbors(int r, int c) const {
  * TODO: Adapt this method to work with the Halo region!
  */
     int count = 0;
-    for (int dr = -1; dr <= 1; ++dr) {
-        int row = (r + dr + local_rows_) % local_rows_;
-        for (int dc = -1; dc <= 1; ++dc) {
-            int col = (c + dc + local_cols_) % local_cols_;
+    // for (int dr = -1; dr <= 1; ++dr) {
+    //     int row = (r + dr + local_rows_) % local_rows_;
+    //     for (int dc = -1; dc <= 1; ++dc) {
+    //         int col = (c + dc + local_cols_) % local_cols_;
+    //         if (dr == 0 && dc == 0)
+    //             continue;
+    //         if (current_grid_(row, col) != 0)
+    //             ++count;
+    //     }
+    // }
+    // return count;
+    for (int dr = -1; dr <= 1; ++dr)
+    {
+        for (int dc = -1; dc <= 1; ++dc)
+        {
             if (dr == 0 && dc == 0)
                 continue;
-            if (current_grid_(row, col) != 0)
-                ++count;
+
+            int row = r + dr;
+            int col = c + dc;
+
+            //Basic Bounds check for now (assumes halo is filled)
+            if(row >= 0 && row < current_grid_.rows() &&
+                col >= 0 && col < current_grid_.cols() &&
+                current_grid_(row, col) != 0)
+                {
+                    ++count;
+                }
         }
     }
     return count;
+    
 }
 
 void LocalGameOfLife::exchange_halos() {
