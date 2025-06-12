@@ -2,8 +2,9 @@
 #define GAME_OF_LIFE_H
 
 #include <mpi.h>
-// #include "LocalGameOfLife.h"
-#include "../src/LocalGameOfLife.h"
+#include "LocalGameOfLife.h"
+// #include "../src/LocalGameOfLife.h"
+#include <string>
 #include <memory>
 #include <Eigen/Dense>
 
@@ -40,7 +41,7 @@ private:
     int mpi_size_{};
 
     MPI_Comm cart_comm_{};
-    int dims_[2]{};
+    int dims_[2]{0,0};
     Eigen::MatrixXi global_grid_;
     Eigen::MatrixXi process_grid_;      // used for proc colors in UI, otherwise useless memory sink.
     std::unique_ptr<LocalGameOfLife> local_game_;
