@@ -1,5 +1,4 @@
-// #include "GameOfLife.h"
-#include "../src/GameOfLife.h"
+#include "GameOfLife.h"
 #include "LocalGameOfLife.h"
 
 #include <iostream>

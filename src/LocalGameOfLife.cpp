@@ -77,17 +77,6 @@ int LocalGameOfLife::count_alive_neighbors(int r, int c) const {
  * TODO: Adapt this method to work with the Halo region!
  */
     int count = 0;
-    // for (int dr = -1; dr <= 1; ++dr) {
-    //     int row = (r + dr + local_rows_) % local_rows_;
-    //     for (int dc = -1; dc <= 1; ++dc) {
-    //         int col = (c + dc + local_cols_) % local_cols_;
-    //         if (dr == 0 && dc == 0)
-    //             continue;
-    //         if (current_grid_(row, col) != 0)
-    //             ++count;
-    //     }
-    // }
-    // return count;
     for (int dr = -1; dr <= 1; ++dr)
     {
         for (int dc = -1; dc <= 1; ++dc)
@@ -116,6 +105,89 @@ void LocalGameOfLife::exchange_halos() {
 
     DEBUG_LOG("Rank " << cart_rank_ << " neighbors: N=" << nbr_n_
                       << ", S=" << nbr_s_ << ", W=" << nbr_w_ << ", E=" << nbr_e_ << std::endl);
+
+    //Number of Request: 4 sends + 4 receives = 8 requests
+    MPI_Request requests[8];
+    int request_idx = 0;
+
+    // 1. Allocate temporary buffers for sending and receiving
+    // wee need to copy data to/from contiguos buffers.
+    //Each Buffer needs to hold 'Halo_size_' rows/colums.
+    //For ROws: width is local_cols_
+    //For Cols: height is local_rows_
+
+    // FOr sending rows (North/South)
+    Eigen::MatrixXi send_north_buf(halo_size_, local_cols_); //Top 2 rows of my core data
+    Eigen::MatrixXi send_south_buf(halo_size_, local_cols_); //Bottom 2 rows of my core data
+
+    //For sending colums (West/East)
+    Eigen::MatrixXi send_west_buf(local_rows_, halo_size_); //Left 2 cols of my core data
+    Eigen::MatrixXi send_east_buf(local_rows_, halo_size_); //Right 2 cols of my core data
+
+    //For Receiving rows (North/South halo)
+    Eigen::MatrixXi recv_north_halo_buf(halo_size_, local_cols_); //Into my top 2 halo rows
+    Eigen::MatrixXi recv_south_halo_buf(halo_size_, local_cols_); // Into my bottom 2 halo rows
+
+    //For Receiving columns (West/East halo)
+    Eigen::MatrixXi recv_west_halo_buf(local_rows_, halo_size_); //Into my left 2 halo cols
+    Eigen::MatrixXi recv_east_halo_buf(local_rows_, halo_size_); //Into my bottom 2 halo cols
+
+    // 2. Copy data from current_grid_ into send buffers
+    // Rows to send north (your core rows at index 2 and 3)
+    send_north_buf = current_grid_.block(halo_size_, halo_size_, halo_size_,local_cols_);
+    //Rows to send south (Core rows at index local_rows_ and local_rows_+1)
+    send_south_buf = current_grid_.block(local_rows_,halo_size_,halo_size_,local_cols_);
+
+    // Columns to send West (Core columns at index 2 and 3)
+    send_west_buf = current_grid_.block(halo_size_,halo_size_,local_rows_,halo_size_);
+    //Columns to send rast (Core columns at index local_cols_ and local_cols_+1)
+    send_west_buf = current_grid_.block(halo_size_,local_cols_,local_rows_,halo_size_);
+
+    // 3. Post all receives first (to prevent deadlock)
+    //Receive North Halo (from south neighbor, into your top halo)
+    MPI_Irecv(recv_north_halo_buf.data(),halo_size_ * local_cols_, MPI_INT, nbr_s_,
+              0,cart_comm_, &requests[request_idx++]);
+    //Receive South Halo (from North Neighbor, into your bottom halo)
+    MPI_Irecv(recv_south_halo_buf.data(),halo_size_ * local_cols_, MPI_INT, nbr_n_,
+              1,cart_comm_, &requests[request_idx++]);
+    //Receive West halo (from east neighbor, into your left halo)
+    MPI_Irecv(recv_north_halo_buf.data(),local_rows_ * halo_size_, MPI_INT, nbr_e_,
+              2,cart_comm_, &requests[request_idx++]);
+    //Receive East halo (from west neighborm into your right halo)
+    MPI_Irecv(recv_north_halo_buf.data(),local_rows_ * halo_size_, MPI_INT, nbr_w_,
+              3,cart_comm_, &requests[request_idx++]);
+
+    // 4. Post all sends
+    // send to north (top core rows, to north neighbor)
+    MPI_Isend(send_north_buf.data(),halo_size_ * local_cols_, MPI_INT, nbr_n_,
+                0,cart_comm_,&requests[request_idx++]);
+    // send to south (bottom core rows, to South neighbor)
+    MPI_Isend(send_north_buf.data(),halo_size_ * local_cols_, MPI_INT, nbr_s_,
+                1,cart_comm_,&requests[request_idx++]);
+    // send to west (left core columns, to West neighbor)
+    MPI_Isend(send_north_buf.data(),local_rows_* halo_size_, MPI_INT, nbr_w_,
+                2,cart_comm_,&requests[request_idx++]);
+    // send to east (right core columns, to East neighbor)
+    MPI_Isend(send_north_buf.data(),local_rows_ * halo_size_, MPI_INT, nbr_e_,
+                3,cart_comm_,&requests[request_idx++]);
+
+    // 5. Wait for all communications to complete
+    MPI_Waitall(request_idx, requests, MPI_STATUSES_IGNORE);
+
+    // 6. Copy Received data from temporary buffers into current_grid_ halo regions
+    //Copy North Halo (received into top 2 halo rows of current_grid_)
+    current_grid_.block(0,halo_size_,halo_size_,local_cols_) = recv_north_halo_buf;
+    //Copy South Halo (received into bottom 2 halo rows of current_grid_)
+    current_grid_.block(local_rows_ + halo_size_,halo_size_,halo_size_,local_cols_) = recv_south_halo_buf;
+
+    //Copy West Halo (received into left 2 halo cols of current_grid_)
+    current_grid_.block(halo_size_,0,local_rows_,halo_size_) = recv_west_halo_buf;
+    //Copy East Halo (received into right 2 halo cols of current_grid_)
+    current_grid_.block(halo_size_,local_cols_ + halo_size_, local_rows_,halo_size_) = recv_east_halo_buf;
+
+    
+
+
 
     // TODO This is the main challenge of the project! You must implement the halo exchange logic using MPI
     // Here are some hints:
