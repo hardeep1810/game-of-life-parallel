@@ -3,7 +3,6 @@
 
 #include <mpi.h>
 #include "LocalGameOfLife.h"
-// #include "../src/LocalGameOfLife.h"
 #include <string>
 #include <memory>
 #include <Eigen/Dense>
@@ -35,7 +34,7 @@ public:
 private:
     int global_rows_;
     int global_cols_;
-    int halo_size_ = 0;
+    int halo_size_ = 2;
 
     int mpi_rank_{};
     int mpi_size_{};

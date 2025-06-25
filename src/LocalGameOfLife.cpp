@@ -20,25 +20,9 @@ LocalGameOfLife::LocalGameOfLife(int local_rows, int local_cols, MPI_Comm cart_c
     MPI_Comm_rank(cart_comm_, &cart_rank_);
     MPI_Comm_size(cart_comm_, &cart_size_);
 
-    // Retrieve the topology information from the communicator. This was created in the GameOfLife constructor
-    // and serves as main communicator for the parallelization.
-    // See https://www.mpich.org/static/docs/v3.1/www3/MPI_Cart_get.html
-    // MPI_Cart_get(cart_comm_, 2, dims_, (int[2]) {0, 0}, coords_);
-        int periods[2] = {0,0};
-        MPI_Cart_get(cart_comm_, 2 ,dims_, periods , coords_);
+    int periods[2] = {1,1}; //{0,0};
+    MPI_Cart_get(cart_comm_, 2 ,dims_, periods , coords_);
     
-    // MPI_Cart_Shift is a nice helper functions to get the neighbours for the topology.
-    // We use the periods of cartesian topology
-    // to implement the toroidal/periodic boundary conditions of the Game Of Life.
-    // See https://www.mpich.org/static/docs/v4.1/www3/MPI_Cart_shift.html
-
-    // nbr_x_ are all neighbor ranks (==subgrids) in all 4 directions in 2D, expressed via North, South, East, West.
-    //
-    // TODO: Implement correct neighbor ranks for each process and do not hardcode it like in the example! Use
-    // TODO  MPI_Cart_shift (more convenient) or calculate them manually using dimensions and ranks.
-    // Currently all are set to rank 0, this means 0 is its own neighbor in all directions! When you onlu use
-    // one MPI process (mpirun -n 1) and after implementing exchange_halo() this would even work for the periodic
-    // boundary conditions! Try to understand why!
     // nbr_n_ = 0;
     // nbr_s_ = 0;
     // nbr_w_ = 0;
@@ -46,19 +30,12 @@ LocalGameOfLife::LocalGameOfLife(int local_rows, int local_cols, MPI_Comm cart_c
     MPI_Cart_shift(cart_comm_,0,1, &nbr_n_, &nbr_s_); //rows (north/south)
     MPI_Cart_shift(cart_comm_,1,1,&nbr_w_, &nbr_e_); //Cols (west/east)
 
-    // Setup of current and next grid for Game Of Life. Check any web tutorial or the wikipedia page for why two
-    // grids are used.
-    // current_grid_ = Eigen::MatrixXi::Zero(local_rows_, local_cols_);
-    // next_grid_ = Eigen::MatrixXi::Zero(local_rows_, local_cols_);
     current_grid_ = Eigen::MatrixXi::Zero(local_rows_ + 2 * halo_size_, local_cols_ + 2 * halo_size_);
     next_grid_ = Eigen::MatrixXi::Zero(local_rows_ + 2 * halo_size_, local_cols_ + 2 * halo_size_);
 }
 
 void LocalGameOfLife::randomize(double alive_prob) {
     std::random_device rd;
-    // Initialization of random number generator using the rank (cart_rank_) of the process.
-    // This makes sure all processes are initialized with different random numbers, otherwise
-    // the grid might look quite symmetric. Test it out if you want!
     std::mt19937 gen(rd() + cart_rank_);
     std::bernoulli_distribution dist(alive_prob);
     for (int r = halo_size_; r < local_rows_ + halo_size_; ++r) {
@@ -69,135 +46,190 @@ void LocalGameOfLife::randomize(double alive_prob) {
 }
 
 int LocalGameOfLife::count_alive_neighbors(int r, int c) const {
-/*
- * Method to count current alive neighbours based on the current grid and
- * returning the count. Be careful, this method implements the periodic
- * boundary condition for the sequential case (how?), but this will not be
- * working anymore with the parallel version and a halo region!
- * TODO: Adapt this method to work with the Halo region!
- */
+
     int count = 0;
-    for (int dr = -1; dr <= 1; ++dr)
+    for(int dr = -1; dr <=1; ++dr)
     {
-        for (int dc = -1; dc <= 1; ++dc)
+        for(int dc = -1; dc<=1; ++dc)
         {
-            if (dr == 0 && dc == 0)
+            if(dr ==0 && dc==00)
                 continue;
-
-            int row = r + dr;
-            int col = c + dc;
-
-            //Basic Bounds check for now (assumes halo is filled)
-            if(row >= 0 && row < current_grid_.rows() &&
-                col >= 0 && col < current_grid_.cols() &&
-                current_grid_(row, col) != 0)
-                {
-                    ++count;
-                }
+            if(current_grid_(r + dr, c + dc) == 1) //Assuming 1 for alive
+            {
+                ++count;
+            }
         }
     }
     return count;
-    
 }
 
 void LocalGameOfLife::exchange_halos() {
     MPI_Status status;
 
+
+
+    // Uncomment the following line to see neighbor ranks for debugging
+
     DEBUG_LOG("Rank " << cart_rank_ << " neighbors: N=" << nbr_n_
+
                       << ", S=" << nbr_s_ << ", W=" << nbr_w_ << ", E=" << nbr_e_ << std::endl);
 
-    //Number of Request: 4 sends + 4 receives = 8 requests
+
+
+    // Number of Request: 4 sends + 4 receives = 8 requests
+
     MPI_Request requests[8];
+
     int request_idx = 0;
 
+
+
     // 1. Allocate temporary buffers for sending and receiving
-    // wee need to copy data to/from contiguos buffers.
-    //Each Buffer needs to hold 'Halo_size_' rows/colums.
-    //For ROws: width is local_cols_
-    //For Cols: height is local_rows_
 
-    // FOr sending rows (North/South)
-    Eigen::MatrixXi send_north_buf(halo_size_, local_cols_); //Top 2 rows of my core data
-    Eigen::MatrixXi send_south_buf(halo_size_, local_cols_); //Bottom 2 rows of my core data
+    // Each Buffer needs to hold 'Halo_size_' rows/columns.
 
-    //For sending colums (West/East)
-    Eigen::MatrixXi send_west_buf(local_rows_, halo_size_); //Left 2 cols of my core data
-    Eigen::MatrixXi send_east_buf(local_rows_, halo_size_); //Right 2 cols of my core data
+    // For Rows: width is local_cols_
 
-    //For Receiving rows (North/South halo)
-    Eigen::MatrixXi recv_north_halo_buf(halo_size_, local_cols_); //Into my top 2 halo rows
+    // For Cols: height is local_rows_
+
+
+
+    // For sending rows (North/South)
+
+    Eigen::MatrixXi send_north_buf(halo_size_, local_cols_); // Top 2 rows of my core data
+
+    Eigen::MatrixXi send_south_buf(halo_size_, local_cols_); // Bottom 2 rows of my core data
+
+
+
+    // For sending columns (West/East)
+
+    Eigen::MatrixXi send_west_buf(local_rows_, halo_size_); // Left 2 cols of my core data
+
+    Eigen::MatrixXi send_east_buf(local_rows_, halo_size_); // Right 2 cols of my core data
+
+
+
+    // For Receiving rows (North/South halo)
+
+    Eigen::MatrixXi recv_north_halo_buf(halo_size_, local_cols_); // Into my top 2 halo rows
+
     Eigen::MatrixXi recv_south_halo_buf(halo_size_, local_cols_); // Into my bottom 2 halo rows
 
-    //For Receiving columns (West/East halo)
-    Eigen::MatrixXi recv_west_halo_buf(local_rows_, halo_size_); //Into my left 2 halo cols
-    Eigen::MatrixXi recv_east_halo_buf(local_rows_, halo_size_); //Into my bottom 2 halo cols
 
-    // 2. Copy data from current_grid_ into send buffers
-    // Rows to send north (your core rows at index 2 and 3)
+
+    // For Receiving columns (West/East halo)
+
+    Eigen::MatrixXi recv_west_halo_buf(local_rows_, halo_size_); // Into my left 2 halo cols
+
+    Eigen::MatrixXi recv_east_halo_buf(local_rows_, halo_size_); // Into my right 2 halo cols
+
+
+
+    // 2. Copy data from current_grid_ into send buffers (from core regions)
+
+    // Rows to send North (your core rows at indices halo_size_ and halo_size_+1)
+
     send_north_buf = current_grid_.block(halo_size_, halo_size_, halo_size_,local_cols_);
-    //Rows to send south (Core rows at index local_rows_ and local_rows_+1)
+
+    // Rows to send South (Core rows at indices local_rows_ + halo_size_ - halo_size_ and ...)
+
     send_south_buf = current_grid_.block(local_rows_,halo_size_,halo_size_,local_cols_);
 
-    // Columns to send West (Core columns at index 2 and 3)
+
+
+    // Columns to send West (Core columns at indices halo_size_ and halo_size_+1)
+
     send_west_buf = current_grid_.block(halo_size_,halo_size_,local_rows_,halo_size_);
-    //Columns to send rast (Core columns at index local_cols_ and local_cols_+1)
-    send_west_buf = current_grid_.block(halo_size_,local_cols_,local_rows_,halo_size_);
+
+    // Columns to send East (Core columns at indices local_cols_ + halo_size_ - halo_size_ and ...)
+
+    send_east_buf = current_grid_.block(halo_size_,local_cols_,local_rows_,halo_size_); // CORRECTED: was send_west_buf
+
+
 
     // 3. Post all receives first (to prevent deadlock)
-    //Receive North Halo (from south neighbor, into your top halo)
+
+    // Receive North Halo (from South neighbor, into your top halo)
+
     MPI_Irecv(recv_north_halo_buf.data(),halo_size_ * local_cols_, MPI_INT, nbr_s_,
+
               0,cart_comm_, &requests[request_idx++]);
-    //Receive South Halo (from North Neighbor, into your bottom halo)
+
+    // Receive South Halo (from North Neighbor, into your bottom halo)
+
     MPI_Irecv(recv_south_halo_buf.data(),halo_size_ * local_cols_, MPI_INT, nbr_n_,
+
               1,cart_comm_, &requests[request_idx++]);
-    //Receive West halo (from east neighbor, into your left halo)
-    MPI_Irecv(recv_north_halo_buf.data(),local_rows_ * halo_size_, MPI_INT, nbr_e_,
+
+    // Receive West halo (from East neighbor, into your left halo)
+
+    MPI_Irecv(recv_west_halo_buf.data(),local_rows_ * halo_size_, MPI_INT, nbr_e_, // CORRECTED: was recv_north_halo_buf
+
               2,cart_comm_, &requests[request_idx++]);
-    //Receive East halo (from west neighborm into your right halo)
-    MPI_Irecv(recv_north_halo_buf.data(),local_rows_ * halo_size_, MPI_INT, nbr_w_,
+
+    // Receive East halo (from West neighbor, into your right halo)
+
+    MPI_Irecv(recv_east_halo_buf.data(),local_rows_ * halo_size_, MPI_INT, nbr_w_, // CORRECTED: was recv_north_halo_buf
+
               3,cart_comm_, &requests[request_idx++]);
 
+
+
     // 4. Post all sends
-    // send to north (top core rows, to north neighbor)
+
+    // send to North (top core rows, to North neighbor)
+
     MPI_Isend(send_north_buf.data(),halo_size_ * local_cols_, MPI_INT, nbr_n_,
+
                 0,cart_comm_,&requests[request_idx++]);
-    // send to south (bottom core rows, to South neighbor)
-    MPI_Isend(send_north_buf.data(),halo_size_ * local_cols_, MPI_INT, nbr_s_,
+
+    // send to South (bottom core rows, to South neighbor)
+
+    MPI_Isend(send_south_buf.data(),halo_size_ * local_cols_, MPI_INT, nbr_s_, // CORRECTED: was send_north_buf
+
                 1,cart_comm_,&requests[request_idx++]);
-    // send to west (left core columns, to West neighbor)
-    MPI_Isend(send_north_buf.data(),local_rows_* halo_size_, MPI_INT, nbr_w_,
+
+    // send to West (left core columns, to West neighbor)
+
+    MPI_Isend(send_west_buf.data(),local_rows_* halo_size_, MPI_INT, nbr_w_, // CORRECTED: was send_north_buf
+
                 2,cart_comm_,&requests[request_idx++]);
-    // send to east (right core columns, to East neighbor)
-    MPI_Isend(send_north_buf.data(),local_rows_ * halo_size_, MPI_INT, nbr_e_,
+
+    // send to East (right core columns, to East neighbor)
+
+    MPI_Isend(send_east_buf.data(),local_rows_ * halo_size_, MPI_INT, nbr_e_, // CORRECTED: was send_north_buf
+
                 3,cart_comm_,&requests[request_idx++]);
 
+
+
     // 5. Wait for all communications to complete
+
     MPI_Waitall(request_idx, requests, MPI_STATUSES_IGNORE);
 
+
+
     // 6. Copy Received data from temporary buffers into current_grid_ halo regions
-    //Copy North Halo (received into top 2 halo rows of current_grid_)
+
+    // Copy North Halo (received into top 2 halo rows of current_grid_)
+
     current_grid_.block(0,halo_size_,halo_size_,local_cols_) = recv_north_halo_buf;
-    //Copy South Halo (received into bottom 2 halo rows of current_grid_)
+
+    // Copy South Halo (received into bottom 2 halo rows of current_grid_)
+
     current_grid_.block(local_rows_ + halo_size_,halo_size_,halo_size_,local_cols_) = recv_south_halo_buf;
 
-    //Copy West Halo (received into left 2 halo cols of current_grid_)
+
+
+    // Copy West Halo (received into left 2 halo cols of current_grid_)
+
     current_grid_.block(halo_size_,0,local_rows_,halo_size_) = recv_west_halo_buf;
-    //Copy East Halo (received into right 2 halo cols of current_grid_)
+
+    // Copy East Halo (received into right 2 halo cols of current_grid_)
+
     current_grid_.block(halo_size_,local_cols_ + halo_size_, local_rows_,halo_size_) = recv_east_halo_buf;
 
-    
-
-
-
-    // TODO This is the main challenge of the project! You must implement the halo exchange logic using MPI
-    // Here are some hints:
-    // * Memory layout is critical to this task! Both rows and columns may not have a contiguous layout, even
-    //   as Eigen::Matrix (think about why! It is related to the Halo region!)
-    // * Eigen::Matrix has column major order by default
-    // * You may need to use temporary buffers (std::vector or eigen::Matrix) with the correct size and memory layout!
-    // * To simplify your life, you may think about exchanging single rows / columns for the Halo instead of two
-    //   at once. When you start implementing a Halo size 1, you'll still get an almost correct simulation. Only
-    //   for the corners of each local grid a halo size 1 will break down. Why?
 }
 
 void LocalGameOfLife::print_matrix(const Eigen::MatrixXi &matrix) {
@@ -210,6 +242,10 @@ void LocalGameOfLife::step() {
      * This method implements an actual step of the simulation. It calls exchange_halos() first
      * because it must update the boundary region between the processes!
      */
+    std::cout<< "RANK" << cart_rank_ << ": local_rows=" << local_rows_
+             << " local_cols=" << local_cols_
+             << " current_grid size: " << current_grid_.rows()
+             << "x" << current_grid_.cols() << std::endl;
     exchange_halos();
     for (int r = halo_size_; r < local_rows_ + halo_size_; ++r) {
         for (int c = halo_size_; c < local_cols_ + halo_size_; ++c) {

@@ -39,7 +39,7 @@ GameOfLife::GameOfLife(int global_rows, int global_cols)
         std::cout << "Using MPI grid: " << dims_[0] << " x " << dims_[1] << std::endl;
     }
 
-    int periods[2] = {0, 0};
+    int periods[2] = {1,1}; //{0, 0};
     int reorder = 1;
 
     MPI_Cart_create(MPI_COMM_WORLD, 2, dims_, periods, reorder, &cart_comm_);
