@@ -90,22 +90,37 @@ void GameOfLife::step() {
 }
 
 void GameOfLife::output_to_file(const std::string &filename) {
-    /*
-     * Write the final output to a file.
-     * TODO works for one process, but requires a small change for parallel implementation.
-     */
-    gather_full_grid();
-    std::ofstream outfile(filename);
-    if (!outfile) {
-        throw std::runtime_error("Failed to open output file: " + filename);
-    }
 
-    for (int r = 0; r < global_rows_; ++r) {
-        for (int c = 0; c < global_cols_; ++c) {
-            outfile << (global_grid_(r, c) ? '1' : '0');
+    // gather_full_grid();
+    // std::ofstream outfile(filename);
+    // if (!outfile) {
+    //     throw std::runtime_error("Failed to open output file: " + filename);
+    // }
+
+    // for (int r = 0; r < global_rows_; ++r) {
+    //     for (int c = 0; c < global_cols_; ++c) {
+    //         outfile << (global_grid_(r, c) ? '1' : '0');
+    //     }
+    //     outfile << '\n';
+    // }
+    gather_full_grid();
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    if(rank == 0);
+    std::ofstream outfile(filename);
+    if(!outfile)
+    {
+        throw std::runtime_error("Failed to open output file: "+ filename);
+    }
+    for (int r = 0; r < global_rows_; ++r)
+    {
+        for (int c = 0; c < global_rows_; ++c)
+        {
+            outfile << (global_grid_(r,c) ? '1' : '0');
         }
         outfile << '\n';
     }
+    
 }
 
 bool GameOfLife::is_alive(int row, int col) const {

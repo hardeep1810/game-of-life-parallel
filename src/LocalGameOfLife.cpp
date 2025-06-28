@@ -65,171 +65,60 @@ int LocalGameOfLife::count_alive_neighbors(int r, int c) const {
 
 void LocalGameOfLife::exchange_halos() {
     MPI_Status status;
-
-
-
     // Uncomment the following line to see neighbor ranks for debugging
-
-    DEBUG_LOG("Rank " << cart_rank_ << " neighbors: N=" << nbr_n_
-
-                      << ", S=" << nbr_s_ << ", W=" << nbr_w_ << ", E=" << nbr_e_ << std::endl);
-
-
-
+    // DEBUG_LOG("Rank " << cart_rank_ << " neighbors: N=" << nbr_n_
+                    //   << ", S=" << nbr_s_ << ", W=" << nbr_w_ << ", E=" << nbr_e_ << std::endl);
+    
+    
     // Number of Request: 4 sends + 4 receives = 8 requests
 
     MPI_Request requests[8];
-
     int request_idx = 0;
 
-
-
-    // 1. Allocate temporary buffers for sending and receiving
-
-    // Each Buffer needs to hold 'Halo_size_' rows/columns.
-
-    // For Rows: width is local_cols_
-
-    // For Cols: height is local_rows_
-
-
-
-    // For sending rows (North/South)
-
-    Eigen::MatrixXi send_north_buf(halo_size_, local_cols_); // Top 2 rows of my core data
-
-    Eigen::MatrixXi send_south_buf(halo_size_, local_cols_); // Bottom 2 rows of my core data
-
-
-
-    // For sending columns (West/East)
-
-    Eigen::MatrixXi send_west_buf(local_rows_, halo_size_); // Left 2 cols of my core data
-
-    Eigen::MatrixXi send_east_buf(local_rows_, halo_size_); // Right 2 cols of my core data
-
-
-
-    // For Receiving rows (North/South halo)
-
-    Eigen::MatrixXi recv_north_halo_buf(halo_size_, local_cols_); // Into my top 2 halo rows
-
-    Eigen::MatrixXi recv_south_halo_buf(halo_size_, local_cols_); // Into my bottom 2 halo rows
-
-
-
-    // For Receiving columns (West/East halo)
-
-    Eigen::MatrixXi recv_west_halo_buf(local_rows_, halo_size_); // Into my left 2 halo cols
-
-    Eigen::MatrixXi recv_east_halo_buf(local_rows_, halo_size_); // Into my right 2 halo cols
-
-
-
-    // 2. Copy data from current_grid_ into send buffers (from core regions)
-
-    // Rows to send North (your core rows at indices halo_size_ and halo_size_+1)
-
-    send_north_buf = current_grid_.block(halo_size_, halo_size_, halo_size_,local_cols_);
-
-    // Rows to send South (Core rows at indices local_rows_ + halo_size_ - halo_size_ and ...)
-
-    send_south_buf = current_grid_.block(local_rows_,halo_size_,halo_size_,local_cols_);
-
-
-
-    // Columns to send West (Core columns at indices halo_size_ and halo_size_+1)
-
-    send_west_buf = current_grid_.block(halo_size_,halo_size_,local_rows_,halo_size_);
-
-    // Columns to send East (Core columns at indices local_cols_ + halo_size_ - halo_size_ and ...)
-
-    send_east_buf = current_grid_.block(halo_size_,local_cols_,local_rows_,halo_size_); // CORRECTED: was send_west_buf
-
-
-
-    // 3. Post all receives first (to prevent deadlock)
-
-    // Receive North Halo (from South neighbor, into your top halo)
-
-    MPI_Irecv(recv_north_halo_buf.data(),halo_size_ * local_cols_, MPI_INT, nbr_s_,
-
-              0,cart_comm_, &requests[request_idx++]);
-
-    // Receive South Halo (from North Neighbor, into your bottom halo)
-
-    MPI_Irecv(recv_south_halo_buf.data(),halo_size_ * local_cols_, MPI_INT, nbr_n_,
-
-              1,cart_comm_, &requests[request_idx++]);
-
-    // Receive West halo (from East neighbor, into your left halo)
-
-    MPI_Irecv(recv_west_halo_buf.data(),local_rows_ * halo_size_, MPI_INT, nbr_e_, // CORRECTED: was recv_north_halo_buf
-
-              2,cart_comm_, &requests[request_idx++]);
-
-    // Receive East halo (from West neighbor, into your right halo)
-
-    MPI_Irecv(recv_east_halo_buf.data(),local_rows_ * halo_size_, MPI_INT, nbr_w_, // CORRECTED: was recv_north_halo_buf
-
-              3,cart_comm_, &requests[request_idx++]);
-
-
-
-    // 4. Post all sends
-
-    // send to North (top core rows, to North neighbor)
-
-    MPI_Isend(send_north_buf.data(),halo_size_ * local_cols_, MPI_INT, nbr_n_,
-
-                0,cart_comm_,&requests[request_idx++]);
-
-    // send to South (bottom core rows, to South neighbor)
-
-    MPI_Isend(send_south_buf.data(),halo_size_ * local_cols_, MPI_INT, nbr_s_, // CORRECTED: was send_north_buf
-
-                1,cart_comm_,&requests[request_idx++]);
-
-    // send to West (left core columns, to West neighbor)
-
-    MPI_Isend(send_west_buf.data(),local_rows_* halo_size_, MPI_INT, nbr_w_, // CORRECTED: was send_north_buf
-
-                2,cart_comm_,&requests[request_idx++]);
-
-    // send to East (right core columns, to East neighbor)
-
-    MPI_Isend(send_east_buf.data(),local_rows_ * halo_size_, MPI_INT, nbr_e_, // CORRECTED: was send_north_buf
-
-                3,cart_comm_,&requests[request_idx++]);
-
-
-
-    // 5. Wait for all communications to complete
-
+    //Cart shifts
+    int temp_src, temp_dest;
+
+    MPI_Cart_shift(cart_comm_,0,1,&temp_src,&temp_dest); // Vertical (Row)
+    nbr_n_ = temp_src;
+    nbr_s_ = temp_dest;
+
+    MPI_Cart_shift(cart_comm_,1,1, &temp_src,&temp_dest); // Horizontal (Col)
+    nbr_w_ = temp_src;
+    nbr_e_ = temp_dest;
+
+    //Buffers
+    Eigen::MatrixXi send_north_buf = current_grid_.block(halo_size_, halo_size_, halo_size_, local_cols_);
+    Eigen::MatrixXi send_south_buf = current_grid_.block(local_rows_, halo_size_, halo_size_, local_cols_);
+    Eigen::MatrixXi send_west_buf = current_grid_.block(halo_size_, halo_size_, local_rows_, halo_size_);
+    Eigen::MatrixXi send_east_buf = current_grid_.block(halo_size_, local_cols_, local_rows_, halo_size_);
+
+    Eigen::MatrixXi recv_north_buf(halo_size_, local_cols_);
+    Eigen::MatrixXi recv_south_buf(halo_size_, local_cols_);
+    Eigen::MatrixXi recv_west_buf(local_rows_, halo_size_);
+    Eigen::MatrixXi recv_east_buf(local_rows_, halo_size_);
+
+    //Post Receives
+    MPI_Irecv(recv_north_buf.data(),halo_size_ * local_cols_, MPI_INT , nbr_n_, 0, cart_comm_,&requests[request_idx++]);
+    MPI_Irecv(recv_south_buf.data(),halo_size_ * local_cols_, MPI_INT, nbr_s_, 1, cart_comm_, &requests[request_idx++]);
+    MPI_Irecv(recv_west_buf.data(),local_rows_ * halo_size_, MPI_INT, nbr_w_, 2, cart_comm_, &requests[request_idx++]);
+    MPI_Irecv(recv_east_buf.data(),local_rows_ * halo_size_, MPI_INT, nbr_e_, 3, cart_comm_, &requests[request_idx++]);
+    
+    //Post sends
+    MPI_Isend(send_north_buf.data(),halo_size_ * local_cols_, MPI_INT, nbr_n_, 1, cart_comm_, &requests[request_idx++]);
+    MPI_Isend(send_south_buf.data(),halo_size_ * local_cols_, MPI_INT, nbr_s_, 0, cart_comm_, &requests[request_idx++]);
+    MPI_Isend(send_west_buf.data(), local_rows_ * halo_size_, MPI_INT, nbr_w_, 3, cart_comm_, &requests[request_idx++]);
+    MPI_Isend(send_east_buf.data(),local_rows_ * halo_size_, MPI_INT, nbr_e_, 2, cart_comm_, &requests[request_idx++]);
+    
+    //Wait for all communications to complete
     MPI_Waitall(request_idx, requests, MPI_STATUSES_IGNORE);
 
 
+    // Copy Received data from temporary buffers into current_grid_ halo regions
+    current_grid_.block(0,halo_size_,halo_size_,local_cols_) = recv_north_buf;
+    current_grid_.block(local_rows_ + halo_size_,halo_size_,halo_size_,local_cols_) = recv_south_buf;
 
-    // 6. Copy Received data from temporary buffers into current_grid_ halo regions
-
-    // Copy North Halo (received into top 2 halo rows of current_grid_)
-
-    current_grid_.block(0,halo_size_,halo_size_,local_cols_) = recv_north_halo_buf;
-
-    // Copy South Halo (received into bottom 2 halo rows of current_grid_)
-
-    current_grid_.block(local_rows_ + halo_size_,halo_size_,halo_size_,local_cols_) = recv_south_halo_buf;
-
-
-
-    // Copy West Halo (received into left 2 halo cols of current_grid_)
-
-    current_grid_.block(halo_size_,0,local_rows_,halo_size_) = recv_west_halo_buf;
-
-    // Copy East Halo (received into right 2 halo cols of current_grid_)
-
-    current_grid_.block(halo_size_,local_cols_ + halo_size_, local_rows_,halo_size_) = recv_east_halo_buf;
-
+    current_grid_.block(halo_size_,0,local_rows_,halo_size_) = recv_west_buf;
+    current_grid_.block(halo_size_,local_cols_ + halo_size_, local_rows_,halo_size_) = recv_east_buf;
 }
 
 void LocalGameOfLife::print_matrix(const Eigen::MatrixXi &matrix) {

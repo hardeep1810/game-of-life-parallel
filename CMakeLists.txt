@@ -4,7 +4,7 @@ project(GameOfLifeMPI LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-option(ENABLE_DEBUG "Enable debug logging" OFF)
+option(ENABLE_DEBUG "Enable debug logging" ON)
 
 if (ENABLE_DEBUG)
     target_compile_definitions(game_of_life PRIVATE DEBUG)
