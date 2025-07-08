@@ -39,7 +39,7 @@ GameOfLife::GameOfLife(int global_rows, int global_cols)
         std::cout << "Using MPI grid: " << dims_[0] << " x " << dims_[1] << std::endl;
     }
 
-    int periods[2] = {1,1}; //{0, 0};
+    int periods[2] = {1, 1};  // Enable periodic boundaries
     int reorder = 1;
 
     MPI_Cart_create(MPI_COMM_WORLD, 2, dims_, periods, reorder, &cart_comm_);
@@ -60,10 +60,14 @@ GameOfLife::GameOfLife(int global_rows, int global_cols)
     // class must be changed most!
     local_game_ = std::make_unique<LocalGameOfLife>(local_rows, local_cols, cart_comm_, halo_size_);
 
+    // Initialize global grid for ALL processes (needed for gather operations)
+    global_grid_ = Eigen::MatrixXi::Zero(global_rows_, global_cols_);
+    
     // The following matrix holds the rank per gridpoint. In principle this information could be calculated on the fly,
     // when it is needed, but for our teaching project storage is not such an issue and we accept having another
     // full-sized matrix.
-    process_grid_.resize(global_rows, global_cols);
+    // process_grid_ = Eigen::MatrixXi::Zero(global_rows_, global_cols_);
+    process_grid_.resize(global_rows,global_cols);
     int rank = 0;
     for (int pr = 0; pr < dims_[0]; ++pr) {
         for (int pc = 0; pc < dims_[1]; ++pc) {
@@ -73,7 +77,6 @@ GameOfLife::GameOfLife(int global_rows, int global_cols)
             ++rank;
         }
     }
-
 }
 
 GameOfLife::~GameOfLife() {
@@ -90,37 +93,23 @@ void GameOfLife::step() {
 }
 
 void GameOfLife::output_to_file(const std::string &filename) {
-
-    // gather_full_grid();
-    // std::ofstream outfile(filename);
-    // if (!outfile) {
-    //     throw std::runtime_error("Failed to open output file: " + filename);
-    // }
-
-    // for (int r = 0; r < global_rows_; ++r) {
-    //     for (int c = 0; c < global_cols_; ++c) {
-    //         outfile << (global_grid_(r, c) ? '1' : '0');
-    //     }
-    //     outfile << '\n';
-    // }
     gather_full_grid();
-    int rank;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    if(rank == 0);
-    std::ofstream outfile(filename);
-    if(!outfile)
+    if(mpi_rank_ == 0)
     {
-        throw std::runtime_error("Failed to open output file: "+ filename);
+         std::ofstream outfile(filename);
+        if(!outfile)
+            {
+                throw std::runtime_error("Failed to open output file: "+ filename); 
+            }
+            for (int r = 0; r < global_rows_; ++r)
+            {
+                for (int c = 0; c < global_rows_; ++c)
+                {
+                    outfile << (global_grid_(r,c) ? '1' : '0');
+                }
+            outfile << '\n';
+            }
     }
-    for (int r = 0; r < global_rows_; ++r)
-    {
-        for (int c = 0; c < global_rows_; ++c)
-        {
-            outfile << (global_grid_(r,c) ? '1' : '0');
-        }
-        outfile << '\n';
-    }
-    
 }
 
 bool GameOfLife::is_alive(int row, int col) const {

@@ -1,0 +1,12 @@
+# Prevent build directory from breaking Docker builds
+build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Optional: Also ignore typical C++ build artifacts
+*.o
+*.so
+*.out
+*.log

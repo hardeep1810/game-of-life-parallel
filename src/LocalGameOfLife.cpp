@@ -131,10 +131,6 @@ void LocalGameOfLife::step() {
      * This method implements an actual step of the simulation. It calls exchange_halos() first
      * because it must update the boundary region between the processes!
      */
-    std::cout<< "RANK" << cart_rank_ << ": local_rows=" << local_rows_
-             << " local_cols=" << local_cols_
-             << " current_grid size: " << current_grid_.rows()
-             << "x" << current_grid_.cols() << std::endl;
     exchange_halos();
     for (int r = halo_size_; r < local_rows_ + halo_size_; ++r) {
         for (int c = halo_size_; c < local_cols_ + halo_size_; ++c) {
