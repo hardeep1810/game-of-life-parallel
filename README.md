@@ -142,3 +142,10 @@ The Game of Life grid is stored in a plain text file format with the following s
 ## Common Patterns
 
 The script `scripts/generate_patterns.py` can generate common patterns for testing. See `scripts/README.md` for usage.
+
+## Automated Workload Metric Analysis & Performance
+
+Automated execution monitoring, log parsing, and performance profiling scripts are included to analyze scaling performance across HPC cluster nodes.
+
+### Speedup Benchmark
+![Speedup Plot](assignment_02_speedup.png)
